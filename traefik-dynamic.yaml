@@ -1,4 +1,4 @@
-# traefik_dynamic.yaml
+# traefik-dynamic.yaml
 tls:
   certificates:
     - certFile: "/etc/traefik/certs/local-cert.pem"

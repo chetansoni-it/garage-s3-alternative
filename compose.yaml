@@ -58,29 +58,18 @@ services:
     restart: unless-stopped
     depends_on:
       - garage
-    # ADD THIS SECTION:
     extra_hosts:
       - "${S3_SUBDOMAIN}:host-gateway"
     env_file:
       - .env # Load environment variables from .env file (# Garage WebUI section Env required)
     volumes:
+      # Alpine Linux looks here for trusted CA certificates
+      - ./certs/rootCA.crt:/etc/ssl/certs/rootCA.pem:ro
       - ./certs/rootCA.crt:/usr/local/share/ca-certificates/rootCA.crt:ro
-    # environment:
-    #   - API_BASE_URL=http://garage:3903
-    #   - API_ADMIN_KEY=${GARAGE_ADMIN_TOKEN}
-    #   - S3_ENDPOINT_URL=http://${S3_SUBDOMAIN}
-    #   - S3_REGION=garage
+      - ./garage.toml:/etc/garage.toml:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.garage-ui.rule=Host(`${WEBUI_SUBDOMAIN}`)"
-      - "traefik.http.routers.garage-ui.entrypoints=websecure" # for HTTPs
-      - "traefik.http.services.garage-ui-svc.loadbalancer.server.port=3909"
-
-      # Web UI Router (HTTPS)
+      - "traefik.http.routers.garage-ui.entrypoints=websecure"
       - "traefik.http.routers.garage-ui.tls=true"
-      # - "traefik.http.routers.garage-ui.entrypoints=websecure" # for HTTPS
-      # # HTTP to HTTPS Redirect
-      # - "traefik.http.routers.garage-ui-http.rule=Host(`${WEBUI_SUBDOMAIN}`)"
-      # - "traefik.http.routers.garage-ui-http.entrypoints=web"
-      # - "traefik.http.routers.garage-ui-http.middlewares=redirect-to-https"
-      # - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.services.garage-ui-svc.loadbalancer.server.port=3909"
