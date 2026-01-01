@@ -1,0 +1,30 @@
+services:
+  garage:
+    image: dxflrs/garage:090dbb412aff0afcbd42183ec12fa62c15bde58b
+    container_name: garage
+    restart: unless-stopped
+    # Using -c to ensure it picks up your mapped config
+    command: /garage -c /etc/garage.toml server
+    ports:
+      - "3900:3900"
+      - "3901:3901"
+      - "3902:3902"
+      - "3903:3903"
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - ./meta:/var/lib/garage/meta
+      - ./data:/var/lib/garage/data
+
+  webui:
+    image: khairul169/garage-webui:1.1.0
+    container_name: garage-webui
+    restart: unless-stopped
+    depends_on:
+      - garage
+    ports:
+      - "3909:3909"
+    environment:
+      - API_BASE_URL=http://garage:3903
+      - API_ADMIN_KEY=6cd708160b880db78699c54ee8a25ba162a11835239d3923f7c3f82a7d8d43a3
+      - S3_ENDPOINT_URL=http://localhost:3900
+      - S3_REGION=garage
