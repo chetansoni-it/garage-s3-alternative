@@ -38,10 +38,9 @@ chmod +x setup-garage.sh  # Only needed for Linux/macOS
 
 | Service | URL | Note |
 | :--- | :--- | :--- |
-| S3 API | http://localhost:3900 | Endpoint for S3 clients (AWS CLI, Cyberduck, etc.) |
-| Web UI | http://localhost:3909 | Browser interface for managing buckets and keys |
-| S3 Web | http://localhost:3902 | Used for static website hosting via S3 |
-| Admin API | http://localhost:3903 | Internal API used by the Web UI |
+| **S3 API** | [https://s3.garage.localhost](https://s3.garage.localhost) | Endpoint for S3 clients (AWS CLI, Cyberduck, etc.) |
+| **Web UI** | [https://ui.garage.localhost](https://ui.garage.localhost) | Browser interface for managing buckets and keys |
+| **Traefik Dashboard** | [http://localhost:8080](http://localhost:8080) | Monitor routes and SSL certificates |
 
 ---
 ### 📝 Configuration
@@ -142,81 +141,149 @@ These lines define the admin API settings. api_bind_addr is the address that Gar
 ---
 ### Docker Compose
 
-The `compose.yaml` file defines the Garage and WebUI services. It is used to define the network, S3 API, and admin settings.
+The `compose.yaml` file defines the Traefik, Garage, and WebUI services. Traefik acts as a reverse proxy handling SSL termination and routing.
 
 ```yaml
 services:
+  traefik:
+    image: traefik:v3.6.6
+    container_name: traefik_container
+    hostname: chetan-traefik
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      # Define Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Global Redirect HTTP -> HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Enable File Provider for SSL Certs
+      - "--providers.file.filename=/etc/traefik/traefik-dynamic.yaml"
+
+    ports:
+      - "80:80" # HTTP traffic
+      - "443:443" # HTTPS traffic
+      - "8080:8080" # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/etc/traefik/certs:ro
+      - ./traefik-dynamic.yaml:/etc/traefik/traefik-dynamic.yaml:ro
+
   garage:
     image: dxflrs/garage:090dbb412aff0afcbd42183ec12fa62c15bde58b
-    container_name: garage
+    container_name: garage_container
+    hostname: chetan-garage
     restart: unless-stopped
     # Using -c to ensure it picks up your mapped config
     command: /garage -c /etc/garage.toml server
+    env_file:
+      - .env # Load environment variables from .env file (only MSYS_NO_PATHCONV=1 env is required)
     ports:
-      - "3900:3900"
-      - "3901:3901"
-      - "3902:3902"
-      - "3903:3903"
+      - "3901:3901" # Keep RPC open for clustering
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
-      - ./meta:/var/lib/garage/meta
-      - ./data:/var/lib/garage/data
+      - ${METADATA_DIR}:/var/lib/garage/meta
+      - ${DATA_DIR}:/var/lib/garage/data
+    labels:
+      - "traefik.enable=true"
+      # S3 API Router
+      - "traefik.http.routers.garage-s3.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.${S3_SUBDOMAIN}`) || Host(`${S3_SUBDOMAIN}`)"
+      - "traefik.http.routers.garage-s3.entrypoints=websecure"
+      - "traefik.http.routers.garage-s3.service=garage-s3-svc"
+      - "traefik.http.services.garage-s3-svc.loadbalancer.server.port=3900"
+      # S3 API Router (HTTPS)
+      - "traefik.http.routers.garage-s3.tls=true"
 
   webui:
     image: khairul169/garage-webui:1.1.0
-    container_name: garage-webui
+    container_name: garage-webui_container
+    hostname: chetan-webui
     restart: unless-stopped
     depends_on:
       - garage
-    ports:
-      - "3909:3909"
-    environment:
-      - API_BASE_URL=http://garage:3903
-      - API_ADMIN_KEY=6cd708160b880db78699c54ee8a25ba162a11835239d3923f7c3f82a7d8d43a3 # Replace with Generated "your_admin_token"/API admin key
-      - S3_ENDPOINT_URL=http://localhost:3900
-      - S3_REGION=garage
+    extra_hosts:
+      - "${S3_SUBDOMAIN}:host-gateway"
+    env_file:
+      - .env # Load environment variables from .env file (# Garage WebUI section Env required)
+    volumes:
+      # Alpine Linux looks here for trusted CA certificates
+      - ./certs/rootCA.crt:/etc/ssl/certs/rootCA.pem:ro
+      - ./certs/rootCA.crt:/usr/local/share/ca-certificates/rootCA.crt:ro
+      - ./garage.toml:/etc/garage.toml:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.garage-ui.rule=Host(`${WEBUI_SUBDOMAIN}`)"
+      - "traefik.http.routers.garage-ui.entrypoints=websecure"
+      - "traefik.http.routers.garage-ui.tls=true"
+      - "traefik.http.services.garage-ui-svc.loadbalancer.server.port=3909"
+
 ```
 
 #### Explaination of Docker Compose File
 
 ```yaml
 services:
-  garage:
-    image: dxflrs/garage:090dbb412aff0afcbd42183ec12fa62c15bde58b
-    container_name: garage
-    restart: unless-stopped
-    # Using -c to ensure it picks up your mapped config
-    command: /garage -c /etc/garage.toml server
+  traefik:
+    image: traefik:v3.6.6
     ports:
-      - "3900:3900"
-      - "3901:3901"
-      - "3902:3902"
-      - "3903:3903"
-    volumes:
-      - ./garage.toml:/etc/garage.toml:ro
-      - ./meta:/var/lib/garage/meta
-      - ./data:/var/lib/garage/data
+      - "80:80"
+      - "443:443"
 ```
 
-This part of the compose.yaml file defines the Garage service. It uses the dxflrs/garage image and maps the garage.toml file to the /etc/garage.toml file in the container. It also maps the meta and data directories to the /var/lib/garage/meta and /var/lib/garage/data directories in the container.
+This part defines the **Traefik** service, which handles SSL termination and routes traffic to the correct containers based on the hostname used in the request.
+
+```yaml
+  garage:
+    image: dxflrs/garage:090dbb412aff0afcbd42183ec12fa62c15bde58b
+    labels:
+      - "traefik.http.routers.garage-s3.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.${S3_SUBDOMAIN}`) || Host(`${S3_SUBDOMAIN}`)"
+      - "traefik.http.routers.garage-s3.tls=true"
+```
+
+This part of the `compose.yaml` file defines the **Garage** service. Instead of exposing ports directly, it uses Traefik labels to define routing rules for S3 API traffic (both top-level and bucket subdomains) with TLS enabled.
 
 ```yaml
   webui:
     image: khairul169/garage-webui:1.1.0
-    container_name: garage-webui
-    restart: unless-stopped
-    depends_on:
-      - garage
-    ports:
-      - "3909:3909"
-    environment:
-      - API_BASE_URL=http://garage:3903
-      - API_ADMIN_KEY=6cd708160b880db78699c54ee8a25ba162a11835239d3923f7c3f82a7d8d43a3
-      - S3_ENDPOINT_URL=http://localhost:3900
-      - S3_REGION=garage
+    labels:
+      - "traefik.http.routers.garage-ui.rule=Host(`${WEBUI_SUBDOMAIN}`)"
+      - "traefik.http.routers.garage-ui.tls=true"
 ```
 
-This part of the compose.yaml file defines the WebUI service. It uses the khairul169/garage-webui image and maps the garage.toml file to the /etc/garage.toml file in the container. It also maps the meta and data directories to the /var/lib/garage/meta and /var/lib/garage/data directories in the container.
+This part defines the **WebUI** service, which is also routed via Traefik. It provides the browser interface at `https://ui.garage.localhost`.
+
+---
+### 🔐 SSL/HTTPS Configuration
+
+This project uses Traefik to provide HTTPS. You can either use a self-signed certificate for local development or provide your own certificates.
+
+#### 1. Generate a Self-Signed Certificate
+If you don't have a certificate, you can generate one using `openssl` (run this from the project root):
+
+```bash
+# Create the certs directory if it doesn't exist
+mkdir -p certs
+
+# Generate a self-signed certificate and private key
+openssl req -x509 -newkey rsa:4096 -keyout certs/local-key.pem -out certs/local-cert.pem -sha256 -days 3650 -nodes -subj "/CN=*.garage.localhost"
+```
+
+#### 2. Add Existing Certificates
+If you have existing certificates, place them in the `certs/` directory and ensure the filenames match those in `traefik-dynamic.yaml`:
+
+```yaml
+# traefik-dynamic.yaml
+tls:
+  certificates:
+    - certFile: "/etc/traefik/certs/local-cert.pem"
+      keyFile: "/etc/traefik/certs/local-key.pem"
+```
+
+#### 3. Trusting the Certificate (Local Development)
+For the WebUI to communicate securely with the S3 API via Traefik, it needs to trust the certificate. If you are using a custom Root CA, place it at `certs/rootCA.crt`. The containers are configured to load this from the `./certs` volume.
 
 ---
 ### 🛠 Troubleshooting
