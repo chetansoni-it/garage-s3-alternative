@@ -22,8 +22,8 @@ services:
     restart: unless-stopped
     # Using -c to ensure it picks up your mapped config
     command: /garage -c /etc/garage.toml server
-    environment:
-      - MSYS_NO_PATHCONV=1
+    env_file:
+      - .env # Load environment variables from .env file (only MSYS_NO_PATHCONV=1 env is required)
     ports:
       - "3901:3901" # Keep RPC open for clustering
     volumes:
@@ -45,11 +45,16 @@ services:
     restart: unless-stopped
     depends_on:
       - garage
-    environment:
-      - API_BASE_URL=http://garage:3903
-      - API_ADMIN_KEY=${GARAGE_ADMIN_TOKEN}
-      - S3_ENDPOINT_URL=http://${S3_SUBDOMAIN}
-      - S3_REGION=garage
+    # ADD THIS SECTION:
+    extra_hosts:
+      - "${S3_SUBDOMAIN}:host-gateway"
+    env_file:
+      - .env # Load environment variables from .env file (# Garage WebUI section Env required)
+    # environment:
+    #   - API_BASE_URL=http://garage:3903
+    #   - API_ADMIN_KEY=${GARAGE_ADMIN_TOKEN}
+    #   - S3_ENDPOINT_URL=http://${S3_SUBDOMAIN}
+    #   - S3_REGION=garage
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.garage-ui.rule=Host(`${WEBUI_SUBDOMAIN}`)"
