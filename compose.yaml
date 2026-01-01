@@ -25,6 +25,6 @@ services:
       - "3909:3909"
     environment:
       - API_BASE_URL=http://garage:3903
-      - API_ADMIN_KEY=6cd708160b880db78699c54ee8a25ba162a11835239d3923f7c3f82a7d8d43a3
+      - API_ADMIN_KEY=6cd708160b880db78699c54ee8a25ba162a11835239d3923f7c3f82a7d8d43a3 # Replace with Generated API admin key
       - S3_ENDPOINT_URL=http://localhost:3900
       - S3_REGION=garage
