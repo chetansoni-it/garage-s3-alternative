@@ -8,12 +8,23 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      # Define Entrypoints
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Global Redirect HTTP -> HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Enable File Provider for SSL Certs
+      - "--providers.file.filename=/etc/traefik/traefik-dynamic.yaml"
+
     ports:
       - "80:80" # HTTP traffic
+      - "443:443" # HTTPS traffic
       - "8080:8080" # Traefik Dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/etc/traefik/certs:ro
+      - ./traefik-dynamic.yaml:/etc/traefik/traefik-dynamic.yaml:ro
 
   garage:
     image: dxflrs/garage:090dbb412aff0afcbd42183ec12fa62c15bde58b
@@ -34,9 +45,11 @@ services:
       - "traefik.enable=true"
       # S3 API Router
       - "traefik.http.routers.garage-s3.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.${S3_SUBDOMAIN}`) || Host(`${S3_SUBDOMAIN}`)"
-      - "traefik.http.routers.garage-s3.entrypoints=web"
+      - "traefik.http.routers.garage-s3.entrypoints=websecure"
       - "traefik.http.routers.garage-s3.service=garage-s3-svc"
       - "traefik.http.services.garage-s3-svc.loadbalancer.server.port=3900"
+      # S3 API Router (HTTPS)
+      - "traefik.http.routers.garage-s3.tls=true"
 
   webui:
     image: khairul169/garage-webui:1.1.0
@@ -50,6 +63,8 @@ services:
       - "${S3_SUBDOMAIN}:host-gateway"
     env_file:
       - .env # Load environment variables from .env file (# Garage WebUI section Env required)
+    volumes:
+      - ./certs/rootCA.crt:/usr/local/share/ca-certificates/rootCA.crt:ro
     # environment:
     #   - API_BASE_URL=http://garage:3903
     #   - API_ADMIN_KEY=${GARAGE_ADMIN_TOKEN}
@@ -58,5 +73,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.garage-ui.rule=Host(`${WEBUI_SUBDOMAIN}`)"
-      - "traefik.http.routers.garage-ui.entrypoints=web"
+      - "traefik.http.routers.garage-ui.entrypoints=websecure" # for HTTPs
       - "traefik.http.services.garage-ui-svc.loadbalancer.server.port=3909"
+
+      # Web UI Router (HTTPS)
+      - "traefik.http.routers.garage-ui.tls=true"
+      # - "traefik.http.routers.garage-ui.entrypoints=websecure" # for HTTPS
+      # # HTTP to HTTPS Redirect
+      # - "traefik.http.routers.garage-ui-http.rule=Host(`${WEBUI_SUBDOMAIN}`)"
+      # - "traefik.http.routers.garage-ui-http.entrypoints=web"
+      # - "traefik.http.routers.garage-ui-http.middlewares=redirect-to-https"
+      # - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
